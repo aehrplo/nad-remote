@@ -1,0 +1,17 @@
+services:
+  tv-amp-sync:
+    image: python:3.12-slim # 표준 라이브러리만 쓰므로 pip 설치 불필요
+    container_name: tv-amp-sync
+    restart: unless-stopped # 크래시·NAS 재부팅 후 자동 재시작
+    init: true # PID1 시그널 처리(docker stop 깔끔하게)
+    working_dir: /app
+    volumes:
+      - ./:/app # 이 폴더의 .py 두 개를 마운트
+    command: python -u main.py
+    environment:
+      TV_IP: "192.168.1.10"
+      AMP_IP: "192.168.1.20"
+      AMP_SOURCE: "Stream"
+      AMP_REFERENCE_DB: "0.0"
+      POWER_OFF_WITH_TV: "1"
+      POLL_INTERVAL: "3"

@@ -1,0 +1,24 @@
+[Unit]
+Description=Sync NAD amp power/volume to Samsung TV (local)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust User and paths to your host.
+User=pi
+WorkingDirectory=/opt/nad-remote
+ExecStart=/usr/bin/python3 /opt/nad-remote/main.py
+Restart=always
+RestartSec=5
+
+# Configuration (override the defaults baked into main.py).
+Environment=TV_IP=192.168.1.10
+Environment=AMP_IP=192.168.1.20
+Environment=AMP_SOURCE=Stream
+Environment=AMP_REFERENCE_DB=0.0
+Environment=POWER_OFF_WITH_TV=1
+Environment=POLL_INTERVAL=3
+
+[Install]
+WantedBy=multi-user.target
