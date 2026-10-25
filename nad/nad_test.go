@@ -158,6 +158,29 @@ func TestQueryRetriesThroughSilence(t *testing.T) {
 	}
 }
 
+func TestGetPower(t *testing.T) {
+	f := newFakeC338(t)
+	a := connectFake(t, f)
+	for _, want := range []bool{true, false} {
+		f.mu.Lock()
+		f.state["Main.Power"] = onOff(want)
+		f.mu.Unlock()
+		p, err := a.GetPower()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p == nil || *p != want {
+			t.Fatalf("GetPower = %v, want %v", p, want)
+		}
+	}
+	f.mu.Lock()
+	f.silentQueries = 2 // no answer through the single retry
+	f.mu.Unlock()
+	if p, err := a.GetPower(); err != nil || p != nil {
+		t.Fatalf("GetPower while silent = %v, %v; want nil, nil", p, err)
+	}
+}
+
 func TestResolveSourceErrors(t *testing.T) {
 	a := NewAmp("x", "C338", 0, time.Second)
 	if _, _, err := a.ResolveSource("Nope"); err == nil {

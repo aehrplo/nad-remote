@@ -299,6 +299,37 @@ func (a *Amp) IsResponsive() (bool, error) {
 	return len(r) > 0, err
 }
 
+// GetPower reads just the power state (cheaper than GetStatus). It returns nil
+// if the amp did not report one, e.g. while its control interface is booting.
+func (a *Amp) GetPower() (*bool, error) {
+	if err := a.need(); err != nil {
+		return nil, err
+	}
+	if a.binary {
+		if err := a.bin.Query(msgPower); err != nil {
+			return nil, err
+		}
+		ups, err := a.bin.ReadUpdates(500 * time.Millisecond)
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range ups {
+			if u.Msg == msgPower {
+				return ptr(u.Value != 0), nil
+			}
+		}
+		return nil, nil
+	}
+	r, err := a.text.Query("Main.Power", 400*time.Millisecond, 1)
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := r["Main.Power"]; ok {
+		return ptr(strings.EqualFold(strings.TrimSpace(v), "on")), nil
+	}
+	return nil, nil
+}
+
 // GetVolumeDB reads just the current volume in dB (cheaper than GetStatus).
 // It returns nil if the amp did not report one.
 func (a *Amp) GetVolumeDB() (*float64, error) {
