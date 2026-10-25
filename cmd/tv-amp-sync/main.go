@@ -52,7 +52,7 @@ var (
 
 	// Input to select on the amp when the TV turns on ("" or "none" = don't
 	// change source). C338 tokens: Stream, Wireless, TV, Phono, Coax1, Coax2, Opt1, Opt2
-	ampSource = env("AMP_SOURCE", "TV")
+	ampSource = env("AMP_SOURCE", "Stream")
 
 	// Fixed reference level set on the amp each time it powers on.
 	//
@@ -60,14 +60,14 @@ var (
 	//   level then rides on top of it.
 	//
 	//   NOTE ON LOUDNESS: on the C338, 0.0 dB is essentially maximum. This
-	//   defaults to a SAFE -20 dB. Tune it to your room:
+	//   defaults to 0 dB, so start lower (e.g. -20) on a new setup. Tune it to your room:
 	//     * If the TV can't get loud enough at its max, raise this toward 0.
 	//     * If your TV's OPTICAL out is fixed/full-scale (many Samsung sets do
 	//       NOT attenuate optical), then this value effectively *is* your
 	//       volume — set it to a comfortable listening level and control
 	//       volume here, not on the TV. (HDMI-ARC/CEC volume passthrough isn't
 	//       available: the C338 has no HDMI.)
-	ampReferenceDB = envFloat("AMP_REFERENCE_DB", -20)
+	ampReferenceDB = envFloat("AMP_REFERENCE_DB", 0)
 
 	// Power the amp off when the TV goes to standby?
 	powerOffWithTV = envBool("POWER_OFF_WITH_TV", true)

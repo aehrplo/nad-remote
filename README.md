@@ -176,8 +176,8 @@ Configure via env vars (`--tv`, `--amp`, `--reference-db` override for one-off t
 | `TV_IP` | `192.168.1.10` | Samsung TV address |
 | `AMP_IP` | `192.168.1.20` | NAD amp address |
 | `AMP_MODEL` | *(auto)* | force `C338` / `C368` / `C388` / `D7050` |
-| `AMP_SOURCE` | `TV` | input to select on power-on (empty or `none` to leave it) |
-| `AMP_REFERENCE_DB` | `-20` | level set once each time the amp powers on (see note below) |
+| `AMP_SOURCE` | `Stream` | input to select on power-on (empty or `none` to leave it) |
+| `AMP_REFERENCE_DB` | `0` | level set once each time the amp powers on (see note below) |
 | `POWER_OFF_WITH_TV` | `1` | also power the amp off on TV standby (`0`/`false` to disable) |
 | `POLL_INTERVAL` | `3` | seconds between TV polls |
 | `AMP_POLL_INTERVAL` | `3` | seconds between amp power polls |
@@ -193,8 +193,9 @@ The C338 has no HDMI, so HDMI-ARC/CEC volume passthrough is not available — on
 optical/coax. Some Samsung TVs output **fixed full-scale** over optical and their
 volume slider does nothing downstream. Test yours: if the TV volume has no effect,
 your amp reference *is* your volume — set `AMP_REFERENCE_DB` to a comfortable
-level and control volume via this tool instead. Starts at a safe **−20 dB** (0 dB
-is near-max on a C338); raise toward 0 if the TV can't get loud enough.
+level and control volume via this tool instead. Defaults to **0 dB**, which is
+near-max on a C338 — on a new setup start lower (e.g. −20 dB) and raise toward 0
+if the TV can't get loud enough.
 
 ### Alternative: systemd (no Docker)
 
