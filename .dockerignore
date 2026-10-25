@@ -1,0 +1,5 @@
+.git
+*.md
+*.apk
+*.dex
+docker-compose.yml

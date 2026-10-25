@@ -1,17 +1,21 @@
 services:
   tv-amp-sync:
-    image: python:3.12-slim # 표준 라이브러리만 쓰므로 pip 설치 불필요
+    build: . # 이미지가 없으면 NAS에서 직접 빌드 (Container Manager > 프로젝트)
+    image: nad-remote:latest # 미리 빌드해 가져온(import) 이미지가 있으면 그걸 사용
     container_name: tv-amp-sync
     restart: unless-stopped # 크래시·NAS 재부팅 후 자동 재시작
     init: true # PID1 시그널 처리(docker stop 깔끔하게)
-    working_dir: /app
-    volumes:
-      - ./:/app # 이 폴더의 .py 두 개를 마운트
-    command: python -u main.py
+    network_mode: host # LAN 직결: mDNS 탐색(nad-remote discover)까지 동작
     environment:
+      TZ: "Asia/Seoul" # 로그 타임스탬프 시간대
       TV_IP: "192.168.1.10"
       AMP_IP: "192.168.1.20"
       AMP_SOURCE: "Stream"
       AMP_REFERENCE_DB: "0.0"
       POWER_OFF_WITH_TV: "1"
       POLL_INTERVAL: "3"
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m" # NAS 디스크에 로그가 무한히 쌓이지 않게
+        max-file: "3"

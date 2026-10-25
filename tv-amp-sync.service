@@ -8,7 +8,7 @@ Type=simple
 # Adjust User and paths to your host.
 User=pi
 WorkingDirectory=/opt/nad-remote
-ExecStart=/usr/bin/python3 /opt/nad-remote/main.py
+ExecStart=/opt/nad-remote/tv-amp-sync
 Restart=always
 RestartSec=5
 
