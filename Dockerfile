@@ -16,4 +16,4 @@ FROM scratch
 COPY --from=build /out/ /usr/local/bin/
 # Run as an unprivileged user; nothing here needs root.
 USER 65534:65534
-ENTRYPOINT ["/usr/local/bin/tv-amp-sync"]
+ENTRYPOINT ["/usr/local/bin/nad-agent"]

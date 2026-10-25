@@ -1,8 +1,8 @@
 services:
-  tv-amp-sync:
+  nad-agent:
     build: . # 이미지가 없으면 NAS에서 직접 빌드 (Container Manager > 프로젝트)
     image: nad-remote:latest # 미리 빌드해 가져온(import) 이미지가 있으면 그걸 사용
-    container_name: tv-amp-sync
+    container_name: nad-agent
     restart: unless-stopped # 크래시·NAS 재부팅 후 자동 재시작
     init: true # PID1 시그널 처리(docker stop 깔끔하게)
     network_mode: host # LAN 직결: mDNS 탐색(nad-remote discover)까지 동작

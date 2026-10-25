@@ -1,4 +1,5 @@
-// Command tv-amp-sync turns a NAD amp on/off in step with a Samsung TV, locally.
+// Command nad-agent automates a NAD amp locally: it follows a Samsung TV's power
+// state and pins a reference volume whenever the amp powers on.
 //
 // Two watchers share the amp's single control connection:
 //
@@ -17,9 +18,9 @@
 //
 // Config is via env vars; CLI flags override for one-off testing:
 //
-//	tv-amp-sync            # run the daemon
-//	tv-amp-sync --once     # reconcile a single time, then exit
-//	tv-amp-sync --status   # print TV + amp state and exit
+//	nad-agent            # run the daemon
+//	nad-agent --once     # reconcile a single time, then exit
+//	nad-agent --status   # print TV + amp state and exit
 package main
 
 import (
@@ -415,7 +416,7 @@ func runDaemon(ctx context.Context) int {
 	if !sourceEnabled() {
 		src = "None"
 	}
-	logf("tv-amp-sync started | TV=%s AMP=%s ref=%sdB source=%s power_off_with_tv=%t poll=%v amp_poll=%v",
+	logf("nad-agent started | TV=%s AMP=%s ref=%sdB source=%s power_off_with_tv=%t poll=%v amp_poll=%v",
 		tvIP, ampIP, fmtDB(&ampReferenceDB), src, powerOffWithTV, pollInterval, ampPollInterval)
 
 	var wg sync.WaitGroup

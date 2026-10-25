@@ -20,10 +20,10 @@ status readback (model, firmware, power, source, volume, mute).
 |------|------|
 | `nad/` | Go package: text + binary protocol clients, model-aware `Amp` facade, mDNS / TCP-sweep discovery |
 | `cmd/nad-remote/` | CLI for manual control |
-| `cmd/tv-amp-sync/` | daemon that follows a Samsung TV's power state |
+| `cmd/nad-agent/` | daemon that follows a Samsung TV's power state and pins a reference volume |
 | `Dockerfile` | multi-stage build → `scratch` image with both binaries |
 | `docker-compose.yml` | the daemon as a Synology Container Manager project |
-| `tv-amp-sync.service` | systemd unit, if you'd rather run the binary directly |
+| `nad-agent.service` | systemd unit, if you'd rather run the binary directly |
 
 The amp must have **network standby enabled** on the unit
 (Settings → *Control Setup / Network Standby → On*) or it won't answer while off.
@@ -58,10 +58,10 @@ the project from `docker-compose.yml` as in A — it uses the imported
 ### Operating it
 
 ```bash
-sudo docker logs -f tv-amp-sync                                  # watch events
-sudo docker exec tv-amp-sync tv-amp-sync --status                # TV + amp state
-sudo docker exec tv-amp-sync nad-remote --host 192.168.1.20 status
-sudo docker exec tv-amp-sync nad-remote discover                 # find amps
+sudo docker logs -f nad-agent                      # watch events
+sudo docker exec nad-agent nad-agent --status      # TV + amp state
+sudo docker exec nad-agent nad-remote --host 192.168.1.20 status
+sudo docker exec nad-agent nad-remote discover     # find amps
 ```
 
 The compose file uses `network_mode: host` so the container sits directly on
@@ -126,13 +126,13 @@ connection failures also wrap `nad.ErrConnection`.
 
 - The amp accepts **one control connection at a time**. Open, act, read, close —
   don't hold the socket open across a whole daemon if the NAD app / other
-  integrations may also connect. (`tv-amp-sync` connects per action and per
+  integrations may also connect. (`nad-agent` connects per action and per
   amp poll.)
 - After `PowerOn()` the C338 reboots its control interface and goes silent for
   ~1–2 s. `GetStatus()` already retries across that gap.
 - Give the amp a static DHCP lease so `AMP_IP` never changes.
 
-## Auto-follow a Samsung TV (`tv-amp-sync`)
+## Automation daemon (`nad-agent`)
 
 Turns the amp on when the TV turns on and switches it to the TV input, and powers
 it off when the TV goes to standby. Separately, whenever the amp powers on — by
@@ -164,9 +164,9 @@ for the amp to answer again, sets the volume, reads it back, and retries if the
 restore won (logged as `volume retry n/5`).
 
 ```bash
-tv-amp-sync --status     # show TV + amp state
-tv-amp-sync --once       # reconcile a single time
-tv-amp-sync              # run the daemon (Ctrl-C / docker stop to end)
+nad-agent --status   # show TV + amp state
+nad-agent --once     # reconcile a single time
+nad-agent            # run the daemon (Ctrl-C / docker stop to end)
 ```
 
 Configure via env vars (`--tv`, `--amp`, `--reference-db` override for one-off tests):
@@ -202,10 +202,10 @@ if the TV can't get loud enough.
 ```bash
 GOOS=linux GOARCH=arm64 go build -o bin/ ./cmd/...     # match the host's arch
 sudo mkdir -p /opt/nad-remote && sudo cp bin/* /opt/nad-remote/
-sudo cp tv-amp-sync.service /etc/systemd/system/
-sudoedit /etc/systemd/system/tv-amp-sync.service       # set User + the Environment= values
-sudo systemctl daemon-reload && sudo systemctl enable --now tv-amp-sync
-journalctl -u tv-amp-sync -f
+sudo cp nad-agent.service /etc/systemd/system/
+sudoedit /etc/systemd/system/nad-agent.service    # set User + the Environment= values
+sudo systemctl daemon-reload && sudo systemctl enable --now nad-agent
+journalctl -u nad-agent -f
 ```
 
 ### Alternative: Home Assistant

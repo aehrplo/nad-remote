@@ -1,6 +1,6 @@
 # Go build output / image exports
 /bin/
-/tv-amp-sync
+/nad-agent
 /nad-remote
 *.tar
 *.tar.gz
