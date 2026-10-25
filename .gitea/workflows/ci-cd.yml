@@ -1,0 +1,35 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./...
+
+  deploy:
+    needs: ci
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      # Keep the same Compose project regardless of the runner's workspace path
+      COMPOSE_PROJECT_NAME: nad-remote
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and deploy
+        run: docker compose up -d --build --wait
+      - name: Tag as latest and prune
+        run: |
+          docker tag "nad-remote:${IMAGE_TAG}" nad-remote:latest
+          docker image prune -f

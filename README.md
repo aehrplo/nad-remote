@@ -22,7 +22,8 @@ status readback (model, firmware, power, source, volume, mute).
 | `cmd/nad-remote/` | CLI for manual control |
 | `cmd/nad-agent/` | daemon that follows a Samsung TV's power state and pins a reference volume |
 | `Dockerfile` | multi-stage build → `scratch` image with both binaries |
-| `docker-compose.yml` | the daemon as a Synology Container Manager project |
+| `docker-compose.yml` | the daemon as a Compose project on the NAS |
+| `.gitea/workflows/ci-cd.yml` | test on every push/PR, deploy `main` to the NAS |
 | `nad-agent.service` | systemd unit, if you'd rather run the binary directly |
 
 The amp must have **network standby enabled** on the unit
@@ -30,30 +31,33 @@ The amp must have **network standby enabled** on the unit
 
 ## Run on Synology (Docker)
 
-Pick the image architecture for your NAS: most models (`+`, `xs`, `DS2xx+`…)
-are **Intel/AMD → `linux/amd64`**; a few value/`j` models are **ARM → `linux/arm64`**.
-(*Control Panel → Info Center* shows the CPU.)
+### Deployment (Gitea Actions)
 
-### Option A — let the NAS build it
+`.gitea/workflows/ci-cd.yml` runs `go vet`, `go test` and `go build` on every
+push and pull request. Pushes to `main` are then deployed to the NAS: the job
+talks to the host's Docker daemon through the runner's mounted `docker.sock`
+and runs `docker compose up -d --build`, so the image is built natively for the
+NAS's architecture.
 
-1. Copy this folder to the NAS, e.g. `/volume1/docker/nad-remote`
-   (File Station, or `scp -r . nas:/volume1/docker/nad-remote`).
-2. Edit `docker-compose.yml`: set `TV_IP`, `AMP_IP` and the rest (see table below).
-3. *Container Manager → Project → Create* → path = that folder → it picks up
-   `docker-compose.yml`, builds the image and starts it.
+Each deploy is tagged `nad-remote:<commit sha>` as well as `nad-remote:latest`,
+so you can roll back with
+`IMAGE_TAG=<sha> docker compose -p nad-remote up -d` in a checkout.
 
-Or over SSH: `cd /volume1/docker/nad-remote && sudo docker compose up -d --build`.
+Settings (`TV_IP`, `AMP_IP`, …) live in `docker-compose.yml` itself; change them
+there and push. No Actions secrets or variables are needed.
 
-### Option B — build on your Mac, import on the NAS
+The runner must mount the Docker socket into job containers (leave
+`container.docker_host` empty in the act_runner config) and the `ubuntu-latest`
+label must point to an image that ships the Docker CLI with the Compose plugin,
+such as `gitea/runner-images:ubuntu-latest`.
 
-```bash
-docker build --platform linux/amd64 -t nad-remote:latest .     # or linux/arm64
-docker save nad-remote:latest | gzip > nad-remote.tar.gz
-```
+### Manual
 
-*Container Manager → Image → Action → Import → nad-remote.tar.gz*, then create
-the project from `docker-compose.yml` as in A — it uses the imported
-`nad-remote:latest` instead of building.
+Without the runner, copy this folder to the NAS and run
+`sudo docker compose -p nad-remote up -d --build` there (or create a
+*Container Manager → Project* from the folder). Don't run a manual copy
+alongside the CI deploy — two daemons would fight over the amp's single
+control connection.
 
 ### Operating it
 

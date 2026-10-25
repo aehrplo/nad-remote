@@ -3,3 +3,4 @@
 *.apk
 *.dex
 docker-compose.yml
+.gitea
