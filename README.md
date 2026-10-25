@@ -126,16 +126,32 @@ connection failures also wrap `nad.ErrConnection`.
 
 - The amp accepts **one control connection at a time**. Open, act, read, close —
   don't hold the socket open across a whole daemon if the NAD app / other
-  integrations may also connect. (`tv-amp-sync` connects per action.)
+  integrations may also connect. (`tv-amp-sync` connects per action and per
+  amp poll.)
 - After `PowerOn()` the C338 reboots its control interface and goes silent for
   ~1–2 s. `GetStatus()` already retries across that gap.
 - Give the amp a static DHCP lease so `AMP_IP` never changes.
 
 ## Auto-follow a Samsung TV (`tv-amp-sync`)
 
-Turns the amp on when the TV turns on — switches it to the TV input and sets a
-fixed reference level so the **TV** controls actual loudness — and powers it off
-when the TV goes to standby. **Fully local, no SmartThings cloud, no token.**
+Turns the amp on when the TV turns on and switches it to the TV input, and powers
+it off when the TV goes to standby. Separately, whenever the amp powers on — by
+the TV, the remote, the front panel or a cast — it sets the amp once to a fixed
+reference level (so the **TV** controls actual loudness); you can still change
+the volume afterwards. **Fully local, no SmartThings cloud, no token.**
+
+It runs two watchers in one process, taking turns on the amp's single control
+connection:
+
+| Watcher | Polls | Acts on |
+|---------|-------|---------|
+| TV  | TV `PowerState` every `POLL_INTERVAL` | TV on → amp on + input; TV standby → amp off |
+| Amp | amp `Main.Power?` every `AMP_POLL_INTERVAL` | amp off → on → set `AMP_REFERENCE_DB` once |
+
+The amp watcher only acts on a seen *off → on* edge, so starting the daemon with
+the amp already on, or turning the TV on while the amp is already on, leaves the
+volume alone. Polls that get no answer (amp booting, or the NAD app holding the
+connection) are ignored rather than read as a power change.
 
 How it detects TV power: it reads the TV's own Tizen endpoint
 `http://<tv-ip>:8001/api/v2/` → `device.PowerState` (`on` / `standby`). A
@@ -161,9 +177,10 @@ Configure via env vars (`--tv`, `--amp`, `--reference-db` override for one-off t
 | `AMP_IP` | `192.168.1.20` | NAD amp address |
 | `AMP_MODEL` | *(auto)* | force `C338` / `C368` / `C388` / `D7050` |
 | `AMP_SOURCE` | `TV` | input to select on power-on (empty or `none` to leave it) |
-| `AMP_REFERENCE_DB` | `-20` | fixed level set on power-on (see note below) |
+| `AMP_REFERENCE_DB` | `-20` | level set once each time the amp powers on (see note below) |
 | `POWER_OFF_WITH_TV` | `1` | also power the amp off on TV standby (`0`/`false` to disable) |
 | `POLL_INTERVAL` | `3` | seconds between TV polls |
+| `AMP_POLL_INTERVAL` | `3` | seconds between amp power polls |
 | `TV_HTTP_TIMEOUT` | `2` | seconds for the TV HTTP request |
 | `AMP_READY_TIMEOUT` | `12` | max seconds to wait for the amp after power-on |
 | `VOLUME_SET_ATTEMPTS` | `5` | volume set+verify attempts |

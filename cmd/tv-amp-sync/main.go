@@ -1,9 +1,14 @@
 // Command tv-amp-sync turns a NAD amp on/off in step with a Samsung TV, locally.
 //
-// When the Samsung TV powers on, this powers on the NAD amp, switches it to the
-// TV input, and sets it to a fixed reference volume (so the *TV* controls actual
-// loudness via its digital audio out). When the TV goes to standby, the amp is
-// (optionally) powered off again.
+// Two watchers share the amp's single control connection:
+//
+//   - TV watcher: when the Samsung TV powers on, power on the NAD amp and switch
+//     it to the TV input; when the TV goes to standby, (optionally) power the
+//     amp off again.
+//   - Amp watcher: whenever the amp powers on — by the TV watcher, the remote,
+//     the front panel or a cast — set it once to a fixed reference volume (so
+//     the *TV* controls actual loudness via its digital audio out). The volume
+//     stays adjustable after that.
 //
 // No SmartThings cloud, no OAuth, no expiring token: TV power is read from the
 // TV's own local Tizen endpoint  http://<tv>:8001/api/v2/  -> device.PowerState
@@ -28,6 +33,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	_ "time/tzdata" // the container image is FROM scratch; honour $TZ in logs
@@ -48,7 +54,7 @@ var (
 	// change source). C338 tokens: Stream, Wireless, TV, Phono, Coax1, Coax2, Opt1, Opt2
 	ampSource = env("AMP_SOURCE", "TV")
 
-	// Fixed reference level set on the amp each time the TV turns on.
+	// Fixed reference level set on the amp each time it powers on.
 	//
 	//   This is the amp's fixed operating point; the TV's digital audio-out
 	//   level then rides on top of it.
@@ -66,8 +72,9 @@ var (
 	// Power the amp off when the TV goes to standby?
 	powerOffWithTV = envBool("POWER_OFF_WITH_TV", true)
 
-	pollInterval  = envSeconds("POLL_INTERVAL", 3)
-	tvHTTPTimeout = envSeconds("TV_HTTP_TIMEOUT", 2)
+	pollInterval    = envSeconds("POLL_INTERVAL", 3)
+	ampPollInterval = envSeconds("AMP_POLL_INTERVAL", 3)
+	tvHTTPTimeout   = envSeconds("TV_HTTP_TIMEOUT", 2)
 
 	// After a cold power-on the C338 ignores commands for ~3 s, then PUSHES its
 	// remembered volume/source. Setting volume inside that window races the
@@ -161,18 +168,44 @@ func tvPowerState() string {
 }
 
 // ---------------------------------------------------------------------------
-// Amp actions
+// Amp access
 // ---------------------------------------------------------------------------
 
-// withAmp opens one control connection for the duration of fn. The amp accepts
-// only one connection at a time, so never hold it across polls.
+var (
+	// The amp accepts only one control connection at a time, so the TV and amp
+	// watchers take turns on it.
+	ampMu sync.Mutex
+
+	// Last known amp power: "on", "off", or "" (not yet known). Guarded by ampMu.
+	// Either watcher records what it sees or does, so the amp watcher catches
+	// an off->on edge even when both happen between two of its polls.
+	ampLastPower string
+
+	// ampKick asks the amp watcher to poll now rather than at its next tick.
+	ampKick = make(chan struct{}, 1)
+)
+
+// withAmp opens one control connection for the duration of fn. Never hold it
+// across polls: other clients (the NAD app) need it too.
 func withAmp(fn func(*nad.Amp) error) error {
+	ampMu.Lock()
+	defer ampMu.Unlock()
 	amp := nad.NewAmp(ampIP, ampModel, 0, ampTimeout)
 	if err := amp.Connect(); err != nil {
 		return err
 	}
 	defer amp.Close()
+	if ampModel == "" {
+		ampModel = amp.Model // skip the Main.Model? probe on every later connect
+	}
 	return fn(amp)
+}
+
+func kickAmpWatch() {
+	select {
+	case ampKick <- struct{}{}:
+	default:
+	}
 }
 
 // waitAmpReady blocks until the amp answers commands again after a cold
@@ -219,20 +252,31 @@ func setVolumeVerified(amp *nad.Amp) (bool, *float64, error) {
 	return false, last, nil
 }
 
-// ampOnTVPoweredOn powers the amp, selects the TV input, pins the reference volume.
+// ---------------------------------------------------------------------------
+// TV watcher actions: power and input only (volume is the amp watcher's job)
+// ---------------------------------------------------------------------------
+
+// ampOnTVPoweredOn powers the amp on and selects the TV input.
 func ampOnTVPoweredOn() {
 	err := withAmp(func(amp *nad.Amp) error {
-		st, err := amp.GetStatus()
+		on, err := amp.GetPower()
 		if err != nil {
 			return err
 		}
-		if !st.IsOn() {
+		state := "already on"
+		if on != nil && *on {
+			ampLastPower = "on"
+		} else {
+			if on != nil {
+				ampLastPower = "off"
+			}
 			if err := amp.PowerOn(); err != nil {
 				return err
 			}
-			if err := waitAmpReady(amp); err != nil { // wait out the boot/volume-restore race
+			if err := waitAmpReady(amp); err != nil { // source set during boot gets lost
 				return err
 			}
+			state = "on"
 		}
 		if sourceEnabled() {
 			if err := amp.SetSource(ampSource); err != nil {
@@ -240,24 +284,17 @@ func ampOnTVPoweredOn() {
 			}
 			time.Sleep(300 * time.Millisecond)
 		}
-		ok, vol, err := setVolumeVerified(amp)
-		if err != nil {
-			return err
-		}
 		src := "None"
 		if st, err := amp.GetStatus(); err == nil && st.Source != nil {
 			src = *st.Source
 		}
-		note := ""
-		if !ok {
-			note = "  [UNCONFIRMED]"
-		}
-		logf("amp -> on | source=%s | volume=%s dB%s", src, fmtDB(vol), note)
+		logf("amp -> %s | source=%s", state, src)
 		return nil
 	})
 	if err != nil {
 		logf("amp on-action failed: %v", err)
 	}
+	kickAmpWatch() // pin the volume now instead of up to a poll later
 }
 
 func ampOnTVStandby() {
@@ -275,6 +312,9 @@ func ampOnTVStandby() {
 			}
 			logf("amp -> off (TV standby)")
 		}
+		if st.Power != nil {
+			ampLastPower = "off"
+		}
 		return nil
 	})
 	if err != nil {
@@ -282,8 +322,8 @@ func ampOnTVStandby() {
 	}
 }
 
-// reconcile acts only on a real edge into a known state.
-func reconcile(prev, cur string) {
+// reconcileTV acts only on a real edge into a known state.
+func reconcileTV(prev, cur string) {
 	switch {
 	case cur == "on" && prev != "on":
 		logf("TV -> on")
@@ -291,6 +331,78 @@ func reconcile(prev, cur string) {
 	case cur == "standby" && prev != "standby" && prev != "":
 		logf("TV -> standby")
 		ampOnTVStandby()
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Amp watcher: pin the reference volume whenever the amp powers on
+// ---------------------------------------------------------------------------
+
+// pollAmp reads the amp's power and, on an off->on edge, sets the reference
+// volume once. However the amp was turned on (TV, remote, front panel, a
+// cast), the volume starts from the same level and stays adjustable after.
+//
+// A missing answer (booting, or another client holding the one connection)
+// leaves the last known state alone, so it never counts as an edge. Only a
+// known "off" arms the edge, so starting the daemon with the amp already on
+// doesn't reset its volume.
+func pollAmp() error {
+	return withAmp(func(amp *nad.Amp) error {
+		on, err := amp.GetPower()
+		if err != nil || on == nil {
+			return err
+		}
+		cur := "off"
+		if *on {
+			cur = "on"
+		}
+		prev := ampLastPower
+		ampLastPower = cur
+		if prev == "" {
+			logf("initial amp state: %s", cur)
+		}
+		if prev != "off" || cur != "on" {
+			return nil
+		}
+		logf("amp power-on detected")
+		if err := waitAmpReady(amp); err != nil {
+			logf("amp volume pin failed: %v", err)
+			return nil
+		}
+		ok, vol, err := setVolumeVerified(amp)
+		if err != nil {
+			logf("amp volume pin failed: %v", err)
+			return nil
+		}
+		note := ""
+		if !ok {
+			note = "  [UNCONFIRMED]"
+		}
+		logf("amp volume -> %s dB%s", fmtDB(vol), note)
+		return nil
+	})
+}
+
+func watchAmp(ctx context.Context) {
+	tick := time.NewTicker(ampPollInterval)
+	defer tick.Stop()
+	failing := false
+	for {
+		// Log reachability changes only, not every failed poll.
+		if err := pollAmp(); (err != nil) != failing {
+			failing = err != nil
+			if failing {
+				logf("amp unreachable: %v", err)
+			} else {
+				logf("amp reachable again")
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		case <-ampKick:
+		}
 	}
 }
 
@@ -303,8 +415,13 @@ func runDaemon(ctx context.Context) int {
 	if !sourceEnabled() {
 		src = "None"
 	}
-	logf("tv-amp-sync started | TV=%s AMP=%s ref=%sdB source=%s power_off_with_tv=%t poll=%v",
-		tvIP, ampIP, fmtDB(&ampReferenceDB), src, powerOffWithTV, pollInterval)
+	logf("tv-amp-sync started | TV=%s AMP=%s ref=%sdB source=%s power_off_with_tv=%t poll=%v amp_poll=%v",
+		tvIP, ampIP, fmtDB(&ampReferenceDB), src, powerOffWithTV, pollInterval, ampPollInterval)
+
+	var wg sync.WaitGroup
+	wg.Go(func() { watchAmp(ctx) })
+	defer wg.Wait()
+
 	// Seed with the current state so we don't fire an action on startup.
 	prev := tvPowerState()
 	if prev != "" {
@@ -320,7 +437,7 @@ func runDaemon(ctx context.Context) int {
 		case <-tick.C:
 		}
 		if cur := tvPowerState(); cur != "" {
-			reconcile(prev, cur)
+			reconcileTV(prev, cur)
 			prev = cur
 		}
 	}
@@ -336,6 +453,10 @@ func runOnce() int {
 		ampOnTVStandby()
 	default:
 		logf("TV unreachable — no action")
+	}
+	// Pins the volume if the TV action above just powered the amp on.
+	if err := pollAmp(); err != nil {
+		logf("amp unreachable: %v", err)
 	}
 	return 0
 }
